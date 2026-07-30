@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>편지가 도착했습니다</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: #000;
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+                 "Malgun Gothic", "Noto Sans KR", sans-serif;
+  }
+
+  .page {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ===========================================================
+     배경 영역
+  =========================================================== */
+  .bg-wrap {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    transition: filter 0.9s ease;
+  }
+
+  .bg-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .bg-wrap.blurred {
+    filter: blur(10px) brightness(0.6);
+  }
+
+  /* ===========================================================
+     ★★★ 수정 포인트 1: 숨겨진 클릭(터치) 영역 ★★★
+     top / left 를 조절해 사진 속 원하는 위치로 옮기세요.
+  =========================================================== */
+  .secret-btn {
+    position: absolute;
+    top: 55%;     /* ← 세로 위치 (%) 수정 가능 */
+    left: 55%;    /* ← 가로 위치 (%) 수정 가능 */
+    width: 70px;
+    height: 70px;
+    transform: translate(-50%, -50%);
+    border: none;
+    outline: none;
+    border-radius: 50%;
+    -webkit-tap-highlight-color: transparent;
+    cursor: pointer;
+    z-index: 10;
+    /* 데모 확인용: 살짝 보이게 표시함. 실제 배포 시 transparent로 변경 */
+    background: rgba(255, 255, 255, 0.18);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.25); }
+    50% { box-shadow: 0 0 0 14px rgba(255,255,255,0); }
+  }
+
+  .secret-btn.hidden { display: none; }
+
+  .hint-text {
+    position: absolute;
+    bottom: 6%;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.85);
+    font-size: 13px;
+    letter-spacing: 1px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    z-index: 10;
+    transition: opacity 0.4s ease;
+  }
+  .hint-text.hidden { opacity: 0; }
+
+  /* ===========================================================
+     편지 오버레이 (뒤 배경 어둡게)
+  =========================================================== */
+  .letter-overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.6s ease;
+    z-index: 20;
+  }
+
+  .letter-overlay.show {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  /* 닫기 버튼: 카드 회전과 상관없이 항상 같은 자리에 고정 */
+  .close-btn {
+    position: absolute;
+    top: 6%;
+    right: 7%;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0,0,0,0.4);
+    color: #fff;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ===========================================================
+     카드 뒤집기(flip) 구조
+     - flip-card : 화면 중앙에 나타나는 애니메이션(확대/페이드인) 담당
+     - flip-card-inner : 실제로 Y축으로 180도 회전하는 요소
+     - flip-front : 앞면 (닫힌 편지지 느낌의 카드)
+     - flip-back : 뒷면 (실제 손편지 사진)
+  =========================================================== */
+  .flip-card {
+    width: 100%;
+    max-width: 380px;
+    aspect-ratio: 3 / 4;         /* 카드 비율. 편지 사진 비율에 맞게 조절 가능 */
+    max-height: 78vh;
+    perspective: 1400px;
+    transform: translateY(40px) scale(0.92);
+    opacity: 0;
+    transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.6s ease;
+  }
+
+  .letter-overlay.show .flip-card {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+
+  .flip-card-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+    transition: transform 0.9s cubic-bezier(0.65, 0.05, 0.36, 1);
+  }
+
+  .flip-card-inner.flipped {
+    transform: rotateY(180deg);
+  }
+
+  .flip-face {
+    position: absolute;
+    inset: 0;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    border-radius: 8px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    overflow: hidden;
+  }
+
+  /* 앞면: 닫혀있는 편지지 (한지/아이보리 톤) */
+  .flip-front {
+    background: linear-gradient(135deg, #fdf6e9 0%, #f7ecd8 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .flip-front::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      0deg,
+      rgba(150, 120, 70, 0.05),
+      rgba(150, 120, 70, 0.05) 1px,
+      transparent 1px,
+      transparent 28px
+    );
+  }
+
+  .flip-front-icon {
+    width: 46px;
+    height: 46px;
+    opacity: 0.55;
+    position: relative;
+  }
+
+  /* 뒷면: 실제 손편지 사진 */
+  .flip-back {
+    transform: rotateY(180deg);
+    background: #fdf9f1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .flip-back img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;  /* 편지 전체 내용이 잘리지 않도록 */
+    display: block;
+    cursor: zoom-in;
+  }
+
+  /* 편지 사진 아래 "눌러서 크게 보기" 안내 힌트 */
+  .zoom-hint {
+    position: absolute;
+    bottom: -34px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.8);
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    pointer-events: none;
+  }
+  .zoom-hint.show { opacity: 1; }
+
+  /* ===========================================================
+     확대보기(라이트박스)
+     - 편지 사진을 탭하면 화면 전체에 크게 띄워서 자세히 볼 수 있게 함
+     - 확대된 이미지를 한 번 더 탭하면 탭한 위치를 중심으로 살짝 더 확대됨
+  =========================================================== */
+  .lightbox {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.94);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.35s ease;
+    overflow: hidden;
+  }
+
+  .lightbox.show {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .lightbox img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    transition: transform 0.35s ease;
+    cursor: zoom-in;
+    touch-action: pan-x pan-y;
+  }
+
+  .lightbox img.zoomed {
+    cursor: zoom-out;
+  }
+
+  .lightbox-close {
+    position: absolute;
+    top: 6%;
+    right: 7%;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 51;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+</style>
+</head>
+<body>
+
+  <div class="page">
+
+    <!-- ===========================================================
+         ★★★ 수정 포인트 2: 배경 사진 파일명 ★★★
+         배경.jpg 파일이 이 HTML과 같은 폴더(저장소 루트)에 있어야 합니다.
+    =========================================================== -->
+    <div class="bg-wrap" id="bgWrap">
+      <img src="배경.jpg" alt="background">
+    </div>
+
+    <!-- 숨겨진 비밀 클릭 버튼 -->
+    <button class="secret-btn" id="secretBtn" aria-label="편지 열기"></button>
+    <div class="hint-text" id="hintText">✦ 사진 속 빛나는 부분을 살짝 눌러보세요 ✦</div>
+
+    <!-- 편지 오버레이 -->
+    <div class="letter-overlay" id="letterOverlay">
+      <button class="close-btn" id="closeBtn">✕</button>
+
+      <div class="flip-card">
+        <div class="flip-card-inner" id="flipInner">
+
+          <!-- 앞면: 닫힌 편지지 (간단한 장식 아이콘) -->
+          <div class="flip-face flip-front">
+            <svg class="flip-front-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 21C12 21 3 14.9 3 9.5C3 6.46 5.46 4 8.5 4C10.24 4 11.68 4.94 12 6.09C12.32 4.94 13.76 4 15.5 4C18.54 4 21 6.46 21 9.5C21 14.9 12 21 12 21Z"
+                stroke="#8a6d45" stroke-width="1.4" fill="rgba(138,109,69,0.08)"/>
+            </svg>
+          </div>
+
+          <!-- 뒷면: 실제 손편지 사진 -->
+          <!-- ===========================================================
+               ★★★ 수정 포인트 3: 편지 사진 파일명 ★★★
+               편지.JPG 파일이 이 HTML과 같은 폴더(저장소 루트)에 있어야 합니다.
+          =========================================================== -->
+          <div class="flip-face flip-back">
+            <img src="편지.JPG" alt="손편지" id="letterImage">
+          </div>
+
+        </div>
+
+        <div class="zoom-hint" id="zoomHint">🔍 사진을 눌러 크게 보기</div>
+      </div>
+
+    </div>
+
+    <!-- 확대보기(라이트박스): 편지 사진을 탭하면 여기에 크게 표시됨 -->
+    <div class="lightbox" id="lightbox">
+      <button class="lightbox-close" id="lightboxClose">✕</button>
+      <img src="편지.JPG" alt="손편지 확대" id="lightboxImg">
+    </div>
+
+  </div>
+
+<script>
+  (function () {
+    var bgWrap = document.getElementById('bgWrap');
+    var secretBtn = document.getElementById('secretBtn');
+    var hintText = document.getElementById('hintText');
+    var letterOverlay = document.getElementById('letterOverlay');
+    var closeBtn = document.getElementById('closeBtn');
+    var flipInner = document.getElementById('flipInner');
+    var zoomHint = document.getElementById('zoomHint');
+    var letterImage = document.getElementById('letterImage');
+    var lightbox = document.getElementById('lightbox');
+    var lightboxImg = document.getElementById('lightboxImg');
+    var lightboxClose = document.getElementById('lightboxClose');
+    var flipTimer = null;
+    var hintTimer = null;
+
+    function openLetter() {
+      bgWrap.classList.add('blurred');
+      letterOverlay.classList.add('show');
+      secretBtn.classList.add('hidden');
+      hintText.classList.add('hidden');
+
+      /* 카드가 화면에 나타난 뒤, 살짝 시간차를 두고
+         Y축으로 회전하며 뒷면(편지 사진)이 드러나게 함 */
+      clearTimeout(flipTimer);
+      flipTimer = setTimeout(function () {
+        flipInner.classList.add('flipped');
+      }, 500);
+
+      /* 뒤집기 애니메이션이 끝난 뒤 "눌러서 크게 보기" 힌트 표시 */
+      clearTimeout(hintTimer);
+      hintTimer = setTimeout(function () {
+        zoomHint.classList.add('show');
+      }, 1450);
+    }
+
+    function closeLetter() {
+      bgWrap.classList.remove('blurred');
+      letterOverlay.classList.remove('show');
+      secretBtn.classList.remove('hidden');
+      hintText.classList.remove('hidden');
+
+      /* 다시 열었을 때 앞면부터 다시 보이도록 초기화 */
+      clearTimeout(flipTimer);
+      clearTimeout(hintTimer);
+      flipInner.classList.remove('flipped');
+      zoomHint.classList.remove('show');
+    }
+
+    /* ===========================================================
+       확대보기(라이트박스) 로직
+       - 뒤집힌 상태에서 편지 사진을 탭하면 전체화면 확대보기가 열림
+       - 확대보기 안에서 사진을 탭하면 탭한 지점을 중심으로 확대/축소 토글
+    =========================================================== */
+    function openLightbox() {
+      if (!flipInner.classList.contains('flipped')) return; // 아직 안 뒤집혔으면 무시
+      lightboxImg.classList.remove('zoomed');
+      lightboxImg.style.transform = 'scale(1)';
+      lightbox.classList.add('show');
+    }
+
+    function closeLightbox() {
+      lightbox.classList.remove('show');
+      lightboxImg.classList.remove('zoomed');
+      lightboxImg.style.transform = 'scale(1)';
+    }
+
+    function toggleZoom(e) {
+      if (lightboxImg.classList.contains('zoomed')) {
+        lightboxImg.classList.remove('zoomed');
+        lightboxImg.style.transform = 'scale(1)';
+        return;
+      }
+      var rect = lightboxImg.getBoundingClientRect();
+      var touch = (e.touches && e.touches[0]) ? e.touches[0] : e;
+      var offsetX = ((touch.clientX - rect.left) / rect.width) * 100;
+      var offsetY = ((touch.clientY - rect.top) / rect.height) * 100;
+      lightboxImg.style.transformOrigin = offsetX + '% ' + offsetY + '%';
+      lightboxImg.classList.add('zoomed');
+      lightboxImg.style.transform = 'scale(2.4)';
+    }
+
+    letterImage.addEventListener('click', openLightbox);
+    lightboxClose.addEventListener('click', closeLightbox);
+    lightboxImg.addEventListener('click', toggleZoom);
+
+    /* 사진이 아닌 어두운 배경 부분을 탭하면 확대보기 닫기 */
+    lightbox.addEventListener('click', function (e) {
+      if (e.target === lightbox) closeLightbox();
+    });
+
+    secretBtn.addEventListener('click', openLetter);
+    closeBtn.addEventListener('click', closeLetter);
+
+    letterOverlay.addEventListener('click', function (e) {
+      if (e.target === letterOverlay) closeLetter();
+    });
+  })();
+</script>
+
+</body>
+</html>
